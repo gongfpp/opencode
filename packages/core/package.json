@@ -93,7 +93,8 @@
     "@types/node": "catalog:",
     "@types/which": "3.0.4",
     "drizzle-kit": "catalog:",
-    "fast-check": "catalog:"
+    "fast-check": "catalog:",
+    "zod-legacy": "npm:zod@4.1.8"
   },
   "dependencies": {
     "@ai-sdk/provider": "3.0.19",

@@ -15,6 +15,7 @@ import { Deferred, Effect, Exit, Fiber, Layer, Logger, Schema, SchemaGetter, Sch
 import { z } from "zod"
 import { testEffect } from "./lib/effect"
 import { permissionLayer } from "./lib/permission"
+import { legacyInput } from "./fixture/zod-legacy"
 
 const imageStore = Layer.mock(Image.Service, {
   normalize: (resource, content) => {
@@ -1147,6 +1148,49 @@ describe("Tool", () => {
           call: { type: "tool-call", id: "call-zod", name: "zod", input: { count: "41" } },
         }),
       ).toMatchObject({ output: { count: 42 } })
+    }),
+  )
+
+  it.effect("legacy Zod plugin replacements remain registered and validate arguments", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      const names = ["read", "write", "edit", "shell"]
+      yield* service.transform((editor) => {
+        for (const name of names) {
+          editor.add({ ...make(), name, options: { codemode: false } })
+        }
+      })
+      yield* service.transform((editor) => {
+        for (const name of names) {
+          editor.remove(name)
+          editor.add({
+            name,
+            description: "Legacy plugin replacement",
+            input: legacyInput(),
+            options: { codemode: false },
+            execute: (value) => Effect.succeed({ content: JSON.stringify(value) }),
+          })
+        }
+      })
+
+      const snapshot = yield* service.snapshot()
+      expect(snapshot.definitions.map((tool) => tool.name)).toEqual([...names.toSorted(), "execute"])
+      for (const name of names) {
+        expect(
+          yield* snapshot.execute({
+            ...call(name),
+            call: { type: "tool-call", id: `call-${name}`, name, input: { path: "file.txt", count: "42" } },
+          }),
+        ).toMatchObject({ content: [{ type: "text", text: JSON.stringify({ path: "file.txt", count: 42 }) }] })
+      }
+      expect(
+        yield* Effect.flip(
+          snapshot.execute({
+            ...call("read"),
+            call: { type: "tool-call", id: "invalid-read", name: "read", input: { path: 42, count: "42" } },
+          }),
+        ),
+      ).toBeInstanceOf(Tool.Error)
     }),
   )
 

@@ -8,6 +8,7 @@ import { SessionMessage } from "@opencode/schema/session-message"
 import type { Info } from "@opencode/schema/tool"
 import { Tool } from "../src/tool"
 import { definition, execute } from "../src/tool/runtime"
+import { legacyInput, legacyJsonSchema, legacyRecursive } from "./fixture/zod-legacy"
 
 const context = {
   sessionID: Session.ID.make("ses_tool_schema"),
@@ -325,6 +326,45 @@ test("Zod schemas validate, transform, and describe typed tools", async () => {
         'Invalid arguments for tool "zod":\n- count: Invalid input: expected string, received number\n\nArguments provided:\n{\n  "count": 41\n}\n\nUpdate the arguments and call the tool again.',
     }),
   )
+})
+
+test("legacy Zod overrides describe tools without losing argument validation or transforms", async () => {
+  const input = legacyInput()
+  const tool: Info = {
+    name: "legacy",
+    description: "Legacy Zod tool",
+    input,
+    execute: (value) => Effect.succeed({ content: JSON.stringify(value) }),
+  }
+
+  expect(definition(tool).inputSchema).toEqual(legacyJsonSchema(input, "input"))
+  expect(await Effect.runPromise(execute(tool, { path: "file.txt", count: "42" }, context))).toMatchObject({
+    content: [{ type: "text", text: JSON.stringify({ path: "file.txt", count: 42 }) }],
+  })
+  expect(await Effect.runPromise(Effect.flip(execute(tool, { path: 42, count: "42" }, context)))).toBeInstanceOf(
+    Tool.Error,
+  )
+})
+
+test("legacy Zod overrides retain recursive references and definitions for input and output", async () => {
+  const schema = legacyRecursive()
+  const tool: Info = {
+    name: "recursive-legacy",
+    description: "Recursive legacy tool",
+    input: schema,
+    output: schema,
+    execute: (value) => Effect.succeed({ output: value }),
+  }
+  const result = definition(tool)
+  expect(result.inputSchema).toEqual(legacyJsonSchema(schema, "input"))
+  expect(result.outputSchema).toEqual(legacyJsonSchema(schema, "output"))
+  expect(JSON.stringify(result.inputSchema)).toContain("$defs")
+  expect(JSON.stringify(result.inputSchema)).toContain("$ref")
+  const value = { tree: { name: "root", children: [{ name: "leaf", children: [] }] } }
+  expect(await Effect.runPromise(execute(tool, value, context))).toMatchObject({ output: value })
+  expect(
+    await Effect.runPromise(Effect.flip(execute(tool, { tree: { name: "root", children: [42] } }, context))),
+  ).toBeInstanceOf(Tool.Error)
 })
 
 test("portable schema failures become tool failures", async () => {
